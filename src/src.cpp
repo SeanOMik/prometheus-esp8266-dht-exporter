@@ -4,6 +4,7 @@
 #include <DHT.h>
 #include <DHT_U.h>
 #include <Adafruit_SGP30.h>
+#include <user_interface.h>
 
 #include "config.h"
 #include "version.h"
@@ -181,14 +182,21 @@ void handle_http_root() {
 void handle_http_metrics() {
     log_request();
     static size_t const BUFSIZE = 2000;
+
+    uint32_t free_heap = system_get_free_heap_size();
+
     static char const *response_template =
         "# HELP " PROM_NAMESPACE "_info Metadata about the device.\n"
         "# TYPE " PROM_NAMESPACE "_info gauge\n"
         "# UNIT " PROM_NAMESPACE "_info \n"
         PROM_NAMESPACE "_info{version=\"%s\",board=\"%s\"} 1\n"
-        "# HELP " PROM_NAMESPACE "_info Metadata about a sensor.\n"
-        "# TYPE " PROM_NAMESPACE "_info gauge\n"
-        "# UNIT " PROM_NAMESPACE "_info \n"
+        "# HELP " PROM_NAMESPACE "_free_heap Free heap\n"
+        "# TYPE " PROM_NAMESPACE "_free_heap gauge\n"
+        "# UNIT " PROM_NAMESPACE "_free_heap byte\n"
+        PROM_NAMESPACE "_free_heap %d\n"
+        "# HELP " PROM_NAMESPACE "_sensor Metadata about a sensor.\n"
+        "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
+        "# UNIT " PROM_NAMESPACE "_sensor \n"
         PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
         PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
         "# HELP " PROM_NAMESPACE "_air_humidity_percent Air humidity.\n"
@@ -227,7 +235,7 @@ void handle_http_metrics() {
     }
 
     char response[BUFSIZE];
-    snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, DHT_NAME, "n/a", "SGP30", sgp30_serial, humidity, temperature, heat_index, tvoc, co2, h2, ethanol);
+    snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, free_heap, DHT_NAME, "n/a", "SGP30", sgp30_serial, humidity, temperature, heat_index, tvoc, co2, h2, ethanol);
     http_server.send(200, "text/plain; charset=utf-8", response);
 }
 
