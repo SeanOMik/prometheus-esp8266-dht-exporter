@@ -1,17 +1,21 @@
 # Prometheus ESP8266 DHT Exporter
 
-[![GitHub release](https://img.shields.io/github/v/release/HON95/prometheus-esp8266-dht-exporter?label=Version)](https://github.com/HON95/prometheus-esp8266-dht-exporter/releases)
-
 An IoT Prometheus exporter for measuring temperature and humidity, using an ESP8266 (Arduino-compatible) with a Wi-Fi module and a DHT (temperature + humidity) sensor.
 
 ## Metrics
 
 | Metric | Description | Unit |
 | - | - | - |
-| `iot_info` | Metadata about the device. | |
-| `iot_air_humidity_percent` | Air humidity. | `%` |
-| `iot_air_temperature_celsius` | Air temperature. | `°C` |
-| `iot_air_heat_index_celsius` | Apparent air temperature, based on temperature and humidity. | `°C` |
+| `dorm_info` | Metadata about the device. | |
+| `dorm_free_heap` | Free heap. | `byte` |
+| `dorm_sensor` | Metadata about a sensor. | |
+| `dorm_air_humidity_percent` | Air humidity. | `%H` |
+| `dorm_air_temperature_celsius` | Air temperature. | `°C` |
+| `dorm_air_heat_index_celsius` | Apparent air temperature, based on temperature and humidity. | `°C` |
+| `dorm_air_quality_eco2` | Equivalent calculated carbon-dioxide. | `ppm` |
+| `dorm_air_quality_tvoc` | Total volatile organic compound. | `ppb/t` |
+| `dorm_air_quality_h2` | Hydrogen measurement. | `ppm` |
+| `dorm_air_quality_ethanol` | Ethanol measurement. | `ppm` |
 
 ## Requirements
 
@@ -20,19 +24,14 @@ An IoT Prometheus exporter for measuring temperature and humidity, using an ESP8
 - ESP8266-based board (or some other appropriate Arduino-based board).
     - Tested with "Adafruit Feather HUZZAH ESP8266" and "WEMOS D1 Mini".
 - DHT sensor.
-    - Tested with a cheap DHT11 from eBay and "Wemos DHT Shield" (using pin 2).
+    - Tested with a cheap DHT11 from eBay (using pin 12).
     - DHT11 supports a maximum of 1Hz polling while DHT22 supports a maximum of 2Hz polling.
     - Both DHT11 and DHT22 support both 3V and 5V at 2.5mA max current.
+- Adafruit SGP30 Sensor
 
 ### Software
 
-- [Arduino IDE](https://www.arduino.cc/en/Main/Software)
-    - Download and install.
-- [esp8266 library for Arduino](https://github.com/esp8266/Arduino#installing-with-boards-manager)
-    - See the instructions on the page.
-- [DHT sensor library for ESPx](https://github.com/beegee-tokyo/DHTesp)
-    - Install using the Arduino library manager.
-    - You can also try the Adafruit one, but that one didn't work for me.
+- [PlatformIO](https://platformio.org/)
 
 ## Building
 
@@ -41,17 +40,6 @@ An IoT Prometheus exporter for measuring temperature and humidity, using an ESP8
 Using the "Adafruit Feather HUZZAH ESP8266".
 
 Wire the DHT sensor power to the 3.3V and any GND on the ESP and wire the data output to e.g. pin 14 (aka D5).
-
-### Software
-
-Using the Arduino IDE.
-
-1. Copy `config.default.h` to `config.h` and fill inn the details.
-1. Open `src/src.ino` in the Arduino IDE.
-1. Set the correct settings for the board.
-    - WEMOS D1 Mini uses board "WeMoS D1 R2 & mini".
-    - Adafruit Feather HUZZAH ESP8266 uses "Adafruit Feather HUZZAH ESP8266".
-1. Build and upload using the Arduino IDE.
 
 ## Version
 
