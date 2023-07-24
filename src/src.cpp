@@ -1,6 +1,9 @@
+//#include <Android.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <DHTesp.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#include <Adafruit_SGP30.h>
 
 #include "config.h"
 #include "version.h"
@@ -14,38 +17,75 @@ enum LogLevel {
 };
 
 void setup_dht_sensor();
+void setup_sgp_sensor();
 void setup_wifi();
 void setup_http_server();
+void handle_http_root();
+void handle_http_metrics();
+void handle_http_not_found();
+void log_request();
+void read_humidity_sensor();
+void read_temperature_sensor();
+void read_heat_index();
+void read_sgp();
 void handle_http_home_client();
 void handle_http_metrics_client();
 void read_sensors(boolean force=false);
 bool read_sensor(float (*function)(), float *value);
 void log(char const *message, LogLevel level=LogLevel::INFO);
+void get_http_method_name(char *name, size_t name_length, HTTPMethod method);
 
-DHTesp dht_sensor;
+DHT dht_sensor(DHT_PIN, DHT_TYPE);
+Adafruit_SGP30 sgp_sensor;
+
 ESP8266WebServer http_server(HTTP_SERVER_PORT);
 
+char sgp30_serial[13];
 float humidity, temperature, heat_index;
+uint32_t sgp30_counter = 0;
+uint16_t tvoc, co2, h2, ethanol;
 uint32_t previous_read_time = 0;
 
 void setup(void) {
     char message[128];
+
     Serial.begin(9600);
+    
     setup_dht_sensor();
+    setup_sgp_sensor();
+
+    // Test all the sensors
+    read_sensors(true);
+
     setup_wifi();
+    
     setup_http_server();
+    
     snprintf(message, 128, "Prometheus namespace: %s", PROM_NAMESPACE);
     log(message);
     log("Setup done");
 }
 
 void setup_dht_sensor() {
-    log("Setting up DHT sensor");
-    dht_sensor.setup(DHT_PIN, DHTesp::DHT_TYPE);
-    delay(dht_sensor.getMinimumSamplingPeriod());
-    // Test read
-    read_sensors(true);
+    log("Setting up DHT sensor...");
+    dht_sensor.begin();
+    delay(1000);
     log("DHT sensor ready", LogLevel::DEBUG);
+}
+
+void setup_sgp_sensor() {
+    log("Setting up SGP30 sensor...");
+    if (!sgp_sensor.begin()) {
+        log("SGP30 sensor failed to begin!", LogLevel::ERROR);
+        log("Failed to setup SGP30 sensor!", LogLevel::ERROR);
+        return;
+    }
+
+    snprintf(sgp30_serial, 13, "%x%x%x", sgp_sensor.serialnumber[0], sgp_sensor.serialnumber[1], sgp_sensor.serialnumber[2]);
+    char message[32];
+    snprintf(message, 32, "SGP30 serial #%s", sgp30_serial);
+
+    sgp_sensor.softReset();
 }
 
 void setup_wifi() {
@@ -107,6 +147,7 @@ void setup_wifi() {
     snprintf(message, 128, "Secondary DNS server: %s", WiFi.dnsIP(1).toString().c_str());
     log(message);
 }
+
 void setup_http_server() {
     char message[128];
     log("Setting up HTTP server");
@@ -139,12 +180,17 @@ void handle_http_root() {
 
 void handle_http_metrics() {
     log_request();
-    static size_t const BUFSIZE = 1024;
+    static size_t const BUFSIZE = 2000;
     static char const *response_template =
         "# HELP " PROM_NAMESPACE "_info Metadata about the device.\n"
         "# TYPE " PROM_NAMESPACE "_info gauge\n"
         "# UNIT " PROM_NAMESPACE "_info \n"
-        PROM_NAMESPACE "_info{version=\"%s\",board=\"%s\",sensor=\"%s\"} 1\n"
+        PROM_NAMESPACE "_info{version=\"%s\",board=\"%s\"} 1\n"
+        "# HELP " PROM_NAMESPACE "_info Metadata about a sensor.\n"
+        "# TYPE " PROM_NAMESPACE "_info gauge\n"
+        "# UNIT " PROM_NAMESPACE "_info \n"
+        PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
+        PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
         "# HELP " PROM_NAMESPACE "_air_humidity_percent Air humidity.\n"
         "# TYPE " PROM_NAMESPACE "_air_humidity_percent gauge\n"
         "# UNIT " PROM_NAMESPACE "_air_humidity_percent %%\n"
@@ -156,16 +202,32 @@ void handle_http_metrics() {
         "# HELP " PROM_NAMESPACE "_air_heat_index_celsius Apparent air temperature, based on temperature and humidity.\n"
         "# TYPE " PROM_NAMESPACE "_air_heat_index_celsius gauge\n"
         "# UNIT " PROM_NAMESPACE "_air_heat_index_celsius \u00B0C\n"
-        PROM_NAMESPACE "_air_heat_index_celsius %f\n";
+        PROM_NAMESPACE "_air_heat_index_celsius %f\n"
+        "# HELP " PROM_NAMESPACE "_air_quality_eco2 Equivalent calculated carbon-dioxide (eCO2).\n"
+        "# TYPE " PROM_NAMESPACE "_air_quality_eco2 gauge\n"
+        "# UNIT " PROM_NAMESPACE "_air_quality_eco2 ppm\n"
+        PROM_NAMESPACE "_air_quality_eco2 %d\n"
+        "# HELP " PROM_NAMESPACE "_air_quality_tvoc Total Volatile Organic Compound (TVOC).\n"
+        "# TYPE " PROM_NAMESPACE "_air_quality_tvoc gauge\n"
+        "# UNIT " PROM_NAMESPACE "_air_quality_tvoc ppb\\t\n"
+        PROM_NAMESPACE "_air_quality_tvoc %d\n"
+        "# HELP " PROM_NAMESPACE "_air_quality_h2 Hydrogen.\n"
+        "# TYPE " PROM_NAMESPACE "_air_quality_h2 gauge\n"
+        "# UNIT " PROM_NAMESPACE "_air_quality_h2 ppm\n"
+        PROM_NAMESPACE "_air_quality_h2 %d\n"
+        "# HELP " PROM_NAMESPACE "_air_quality_ethanol Ethanol.\n"
+        "# TYPE " PROM_NAMESPACE "_air_quality_ethanol gauge\n"
+        "# UNIT " PROM_NAMESPACE "_air_quality_ethanol ppm\n"
+        PROM_NAMESPACE "_air_quality_ethanol %d\n";
 
     read_sensors();
-    if (isnan(humidity) || isnan(temperature) || isnan(heat_index)) {
+    if (isnan(humidity) || isnan(temperature) || isnan(heat_index) || isnan(tvoc) || isnan(co2) || isnan(h2) || isnan(ethanol)) {
         http_server.send(500, "text/plain; charset=utf-8", "Sensor error.");
         return;
     }
 
     char response[BUFSIZE];
-    snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, DHT_NAME, humidity, temperature, heat_index);
+    snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, DHT_NAME, "n/a", "SGP30", sgp30_serial, humidity, temperature, heat_index, tvoc, co2, h2, ethanol);
     http_server.send(200, "text/plain; charset=utf-8", response);
 }
 
@@ -175,8 +237,9 @@ void handle_http_not_found() {
 }
 
 void read_sensors(boolean force) {
-    uint32_t min_interval = max(dht_sensor.getMinimumSamplingPeriod(), READ_INTERVAL);
+    uint32_t min_interval = max(READ_INTERVAL, 1000);
     uint32_t current_time = millis();
+
     if (!force && current_time - previous_read_time < min_interval) {
         log("Sensors were recently read, will not read again yet.", LogLevel::DEBUG);
         return;
@@ -186,14 +249,17 @@ void read_sensors(boolean force) {
     read_humidity_sensor();
     read_temperature_sensor();
     read_heat_index();
+    read_sgp();
 }
 
 void read_humidity_sensor() {
     log("Reading humidity sensor ...", LogLevel::DEBUG);
-    bool result = read_sensor([] {
-          return dht_sensor.getHumidity();
-      }, &humidity);
-    if (result) {
+
+    read_sensor([] {
+        return dht_sensor.readHumidity();
+    }, &humidity);
+
+    if (humidity) {
         humidity += HUMIDITY_CORRECTION_OFFSET;
     } else {
         log("Failed to read humidity sensor.", LogLevel::ERROR);
@@ -202,10 +268,12 @@ void read_humidity_sensor() {
 
 void read_temperature_sensor() {
     log("Reading temperature sensor ...", LogLevel::DEBUG);
-    bool result = read_sensor([] {
-        return dht_sensor.getTemperature();
+    
+    read_sensor([] {
+        return dht_sensor.readTemperature();
     }, &temperature);
-    if (result) {
+
+    if (temperature) {
         temperature += TEMPERATURE_CORRECTION_OFFSET;
     } else {
         log("Failed to read temperature sensor.", LogLevel::ERROR);
@@ -214,9 +282,47 @@ void read_temperature_sensor() {
 
 void read_heat_index() {
     if (!isnan(humidity) && !isnan(temperature)) {
-        heat_index = dht_sensor.computeHeatIndex(temperature, humidity, false);
+        heat_index = dht_sensor.computeHeatIndex(temperature, humidity, false); // compute in celsius
     } else {
         heat_index = NAN;
+    }
+}
+
+float getAbsoluteHumidity(float t, float h) {
+    float absoluteHumidity = (2.167 * 6.112) * h ;
+    absoluteHumidity *= exp((17.62 * t)/(243.12 + t));
+    absoluteHumidity /=  (273.15 + t);
+
+    return absoluteHumidity;
+}
+
+void read_sgp() {
+    log("Reading air quality (SGP30) sensor ...", LogLevel::DEBUG);
+
+    sgp_sensor.setHumidity(getAbsoluteHumidity(temperature, humidity));
+
+    if (sgp_sensor.IAQmeasure() && sgp_sensor.IAQmeasureRaw()) {
+        tvoc = sgp_sensor.TVOC;
+        co2 = sgp_sensor.eCO2;
+        h2 = sgp_sensor.rawH2;
+        ethanol = sgp_sensor.rawEthanol;
+
+        sgp30_counter++;
+        if (sgp30_counter == 30) {
+            sgp30_counter = 0;
+
+            uint16_t tvoc_base, eco2_base;
+            if (!sgp_sensor.getIAQBaseline(&eco2_base, &tvoc_base)) {
+                log("Failed to get baseline readings", LogLevel::ERROR);
+                return;
+            }
+
+            char message[128];
+            snprintf(message, 128, "Baseline values: eCO2: 0x%s & TVOC: 0x%s", String(eco2_base, HEX).c_str(), String(tvoc_base, HEX).c_str());
+            log(message, LogLevel::DEBUG);
+        }
+    } else {
+        log("Failed to read air quality sensor.", LogLevel::ERROR);
     }
 }
 
