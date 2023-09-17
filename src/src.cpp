@@ -185,57 +185,98 @@ void handle_http_metrics() {
 
     uint32_t free_heap = system_get_free_heap_size();
 
-    static char const *response_template =
-        "# HELP " PROM_NAMESPACE "_info Metadata about the device.\n"
-        "# TYPE " PROM_NAMESPACE "_info gauge\n"
-        "# UNIT " PROM_NAMESPACE "_info \n"
-        PROM_NAMESPACE "_info{version=\"%s\",board=\"%s\"} 1\n"
-        "# HELP " PROM_NAMESPACE "_free_heap Free heap\n"
-        "# TYPE " PROM_NAMESPACE "_free_heap gauge\n"
-        "# UNIT " PROM_NAMESPACE "_free_heap byte\n"
-        PROM_NAMESPACE "_free_heap %d\n"
-        "# HELP " PROM_NAMESPACE "_sensor Metadata about a sensor.\n"
-        "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
-        "# UNIT " PROM_NAMESPACE "_sensor \n"
-        PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
-        PROM_NAMESPACE "_sensor{sensor=\"%s\",serial=\"%s\"} 1\n"
-        "# HELP " PROM_NAMESPACE "_air_humidity_percent Air humidity.\n"
-        "# TYPE " PROM_NAMESPACE "_air_humidity_percent gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_humidity_percent %%\n"
-        PROM_NAMESPACE "_air_humidity_percent %f\n"
-        "# HELP " PROM_NAMESPACE "_air_temperature_celsius Air temperature.\n"
-        "# TYPE " PROM_NAMESPACE "_air_temperature_celsius gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_temperature_celsius \u00B0C\n"
-        PROM_NAMESPACE "_air_temperature_celsius %f\n"
-        "# HELP " PROM_NAMESPACE "_air_heat_index_celsius Apparent air temperature, based on temperature and humidity.\n"
-        "# TYPE " PROM_NAMESPACE "_air_heat_index_celsius gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_heat_index_celsius \u00B0C\n"
-        PROM_NAMESPACE "_air_heat_index_celsius %f\n"
-        "# HELP " PROM_NAMESPACE "_air_quality_eco2 Equivalent calculated carbon-dioxide (eCO2).\n"
-        "# TYPE " PROM_NAMESPACE "_air_quality_eco2 gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_quality_eco2 ppm\n"
-        PROM_NAMESPACE "_air_quality_eco2 %d\n"
-        "# HELP " PROM_NAMESPACE "_air_quality_tvoc Total Volatile Organic Compound (TVOC).\n"
-        "# TYPE " PROM_NAMESPACE "_air_quality_tvoc gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_quality_tvoc ppb\\t\n"
-        PROM_NAMESPACE "_air_quality_tvoc %d\n"
-        "# HELP " PROM_NAMESPACE "_air_quality_h2 Hydrogen.\n"
-        "# TYPE " PROM_NAMESPACE "_air_quality_h2 gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_quality_h2 ppm\n"
-        PROM_NAMESPACE "_air_quality_h2 %d\n"
-        "# HELP " PROM_NAMESPACE "_air_quality_ethanol Ethanol.\n"
-        "# TYPE " PROM_NAMESPACE "_air_quality_ethanol gauge\n"
-        "# UNIT " PROM_NAMESPACE "_air_quality_ethanol ppm\n"
-        PROM_NAMESPACE "_air_quality_ethanol %d\n";
+    char* response = (char*) malloc(sizeof(char) * BUFSIZE);
+    memset(response, 0, strlen(response)+1); // clear the string to zero's
 
-    read_sensors();
-    if (isnan(humidity) || isnan(temperature) || isnan(heat_index) || isnan(tvoc) || isnan(co2) || isnan(h2) || isnan(ethanol)) {
-        http_server.send(500, "text/plain; charset=utf-8", "Sensor error.");
-        return;
+    {
+        static const char* base_metrics_tmpl = "# HELP " PROM_NAMESPACE "_info Metadata about the device.\n"
+            "# TYPE " PROM_NAMESPACE "_info gauge\n"
+            "# UNIT " PROM_NAMESPACE "_info bool\n"
+            PROM_NAMESPACE "_info{version=\"%s\",board=\"%s\"} 1\n"
+            "# HELP " PROM_NAMESPACE "_free_heap Free heap\n"
+            "# TYPE " PROM_NAMESPACE "_free_heap gauge\n"
+            "# UNIT " PROM_NAMESPACE "_free_heap byte\n"
+            PROM_NAMESPACE "_free_heap %d\n";
+
+        int len = strlen(base_metrics_tmpl) + 100; // add 100 extra characters to fit the templated values
+        char* base_metrics = (char*) malloc(sizeof(char) * len);
+        snprintf(base_metrics, len, base_metrics_tmpl, VERSION, BOARD_NAME, free_heap);
+        strcat(response, base_metrics);
     }
 
-    char response[BUFSIZE];
-    snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, free_heap, DHT_NAME, "n/a", "SGP30", sgp30_serial, humidity, temperature, heat_index, tvoc, co2, h2, ethanol);
+    read_sensors();
+
+    // report dht metrics
+    if (isnan(humidity) || isnan(temperature) || isnan(heat_index)) {
+        static const char* dht_failure = "# HELP " PROM_NAMESPACE "_sensor Metadata and status of the sensor.\n"
+            "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
+            "# UNIT " PROM_NAMESPACE "_sensor bool\n"
+            PROM_NAMESPACE "_sensor{sensor=\"" DHT_NAME "\",serial=\"n/a\"} 0\n";
+        strcat(response, dht_failure);
+    } else {
+        static const char* tmpl = "# HELP " PROM_NAMESPACE "_sensor Metadata and status of the sensor.\n"
+            "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
+            "# UNIT " PROM_NAMESPACE "_sensor bool\n"
+            PROM_NAMESPACE "_sensor{sensor=\"" DHT_NAME "\",serial=\"n/a\"} 1\n"
+            "# HELP " PROM_NAMESPACE "_air_humidity_percent Air humidity.\n"
+            "# TYPE " PROM_NAMESPACE "_air_humidity_percent gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_humidity_percent %%\n"
+            PROM_NAMESPACE "_air_humidity_percent %f\n"
+            "# HELP " PROM_NAMESPACE "_air_temperature_celsius Air temperature.\n"
+            "# TYPE " PROM_NAMESPACE "_air_temperature_celsius gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_temperature_celsius \u00B0C\n"
+            PROM_NAMESPACE "_air_temperature_celsius %f\n"
+            "# HELP " PROM_NAMESPACE "_air_heat_index_celsius Apparent air temperature, based on temperature and humidity.\n"
+            "# TYPE " PROM_NAMESPACE "_air_heat_index_celsius gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_heat_index_celsius \u00B0C\n"
+            PROM_NAMESPACE "_air_heat_index_celsius %f\n";
+
+        int len = strlen(tmpl) + 100; // add 100 extra characters to fit the templated values
+        char* templated = (char*) malloc(sizeof(char) * len);
+        snprintf(templated, len, tmpl, humidity, temperature, heat_index);
+        strcat(response, templated);
+    }
+
+    if (isnan(tvoc) || isnan(co2) || isnan(h2) || isnan(ethanol)) {
+        static const char* sgp30_failure_template = "# HELP " PROM_NAMESPACE "_sensor Metadata and status of the sensor.\n"
+            "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
+            "# UNIT " PROM_NAMESPACE "_sensor bool\n"
+            PROM_NAMESPACE "_sensor{sensor=\"SGP30\",serial=\"%s\"} 0\n";
+
+        int len = strlen(sgp30_failure_template) + 100; // add 100 extra characters to fit the templated values
+        char* templated = (char*) malloc(sizeof(char) * len);
+        snprintf(templated, len, sgp30_failure_template, sgp30_serial);
+        strcat(response, templated);
+    } else {
+        static const char* tmpl = "# HELP " PROM_NAMESPACE "_sensor Metadata and status of the sensor.\n"
+            "# TYPE " PROM_NAMESPACE "_sensor gauge\n"
+            "# UNIT " PROM_NAMESPACE "_sensor bool\n"
+            PROM_NAMESPACE "_sensor{sensor=\"SGP30\",serial=\"%s\"} 1\n"
+            "# HELP " PROM_NAMESPACE "_air_quality_eco2 Equivalent calculated carbon-dioxide (eCO2).\n"
+            "# TYPE " PROM_NAMESPACE "_air_quality_eco2 gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_quality_eco2 ppm\n"
+            PROM_NAMESPACE "_air_quality_eco2 %d\n"
+            "# HELP " PROM_NAMESPACE "_air_quality_tvoc Total Volatile Organic Compound (TVOC).\n"
+            "# TYPE " PROM_NAMESPACE "_air_quality_tvoc gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_quality_tvoc ppb/t\n"
+            PROM_NAMESPACE "_air_quality_tvoc %d\n"
+            "# HELP " PROM_NAMESPACE "_air_quality_h2 Hydrogen.\n"
+            "# TYPE " PROM_NAMESPACE "_air_quality_h2 gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_quality_h2 ppm\n"
+            PROM_NAMESPACE "_air_quality_h2 %d\n"
+            "# HELP " PROM_NAMESPACE "_air_quality_ethanol Ethanol.\n"
+            "# TYPE " PROM_NAMESPACE "_air_quality_ethanol gauge\n"
+            "# UNIT " PROM_NAMESPACE "_air_quality_ethanol ppm\n"
+            PROM_NAMESPACE "_air_quality_ethanol %d\n";
+
+        int len = strlen(tmpl) + 100; // add 100 extra characters to fit the templated values
+        char* templated = (char*) malloc(sizeof(char) * len);
+        snprintf(templated, len, tmpl, sgp30_serial, co2, tvoc, h2, ethanol);
+        strcat(response, templated);
+    }
+
+    //char response[BUFSIZE];
+    //snprintf(response, BUFSIZE, response_template, VERSION, BOARD_NAME, free_heap, DHT_NAME, "n/a", "SGP30", sgp30_serial, humidity, temperature, heat_index, tvoc, co2, h2, ethanol);
     http_server.send(200, "text/plain; charset=utf-8", response);
 }
 
@@ -307,7 +348,10 @@ float getAbsoluteHumidity(float t, float h) {
 void read_sgp() {
     log("Reading air quality (SGP30) sensor ...", LogLevel::DEBUG);
 
-    sgp_sensor.setHumidity(getAbsoluteHumidity(temperature, humidity));
+    // only set humidity if dht reading was successful
+    if (!isnan(temperature) && !isnan(humidity)) {
+        sgp_sensor.setHumidity(getAbsoluteHumidity(temperature, humidity));
+    }
 
     if (sgp_sensor.IAQmeasure() && sgp_sensor.IAQmeasureRaw()) {
         tvoc = sgp_sensor.TVOC;
