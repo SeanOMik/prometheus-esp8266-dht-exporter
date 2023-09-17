@@ -169,9 +169,9 @@ void handle_http_root() {
     log_request();
     static size_t const BUFSIZE = 256;
     static char const *response_template =
-        "Prometheus ESP8266 DHT Exporter by HON95.\n"
+        "Prometheus ESP8266 DHT and SGP30 Exporter by SeanOMik.\n"
         "\n"
-        "Project: https://github.com/HON95/prometheus-esp8266-dht-exporter\n"
+        "Project: https://github.com/seanomik/prometheus-esp8266-dht-exporter\n"
         "\n"
         "Usage: %s\n";
     char response[BUFSIZE];
